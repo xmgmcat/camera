@@ -58,8 +58,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _initSharedPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     Server.host = prefs.getString('host') ?? '';
-    //如果没有存入stun地址，则使用默认的stun地址
-    Server.stunurl = prefs.getString('stun') ?? 'stun:stun.l.google.com:19302';
     Server.room = prefs.getString('room') ?? '';
   }
 
@@ -106,8 +104,8 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(height: 20),
             OutlinedButton(
               onPressed: () {
-                if (Server.host.isNotEmpty && Server.stunurl.isNotEmpty && Server.room.isNotEmpty) {
-                  _callNva(); // 如果三个数据都不为空，进入 call
+                if (Server.host.isNotEmpty && Server.room.isNotEmpty) {
+                  _callNva(); // 如果数据都不为空，进入 call
                 } else {
                   _showSettingsDialog(context); // 否则弹出设置对话框
                 }
@@ -122,9 +120,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// 弹出设置对话框
   void _showSettingsDialog(BuildContext context) async {
-    final TextEditingController controller1 = TextEditingController(text: Server.host); // 直接从全局变量获取值
-    final TextEditingController controller2 = TextEditingController(text: Server.stunurl); // 直接从全局变量获取值
-    final TextEditingController controller3 = TextEditingController(text: Server.room); // 直接从全局变量获取值
+    final TextEditingController controller1 = TextEditingController(text: Server.host);
+    final TextEditingController controller3 = TextEditingController(text: Server.room);
     showDialog(
       context: context,
       builder: (context) {
@@ -138,10 +135,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 decoration: InputDecoration(labelText: '信令服务器地址'),
               ),
               TextField(
-                controller: controller2,
-                decoration: InputDecoration(labelText: 'stun服务器地址'),
-              ),
-              TextField(
                 controller: controller3,
                 decoration: InputDecoration(labelText: '房间号'),
               ),
@@ -150,14 +143,14 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             TextButton(
               onPressed: () async {
-                if (controller1.text.isEmpty || controller2.text.isEmpty || controller3.text.isEmpty) {
+                if (controller1.text.isEmpty || controller3.text.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('缺少必要数据')),
                   );
                   return;
                 }
                 // 保存数据到本地
-                await _saveData(controller1.text, controller2.text, controller3.text);
+                await _saveData(controller1.text, controller3.text);
                 Navigator.of(context).pop();
                 // 跳转到视频设备列表
                 _callNva();
@@ -171,10 +164,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// 保存数据到 SharedPreferences
-  Future<void> _saveData(String value1, String value2, String value3) async {
+  Future<void> _saveData(String value1, String value3) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('host', value1);
-    await prefs.setString('stun', value2);
     await prefs.setString('room', value3);
     //首次打开不存在数据，所以在第一次保存数据时，数据没有传到全局全局变量去，
     // 所以要更新全局变量

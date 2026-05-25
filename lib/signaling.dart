@@ -69,19 +69,8 @@ class Signaling {
   String get sdpSemantics => 'unified-plan'; // SDP语义，默认为Unified Plan
 
   Map<String, dynamic> _iceServers = {
-    'iceServers': [
-      {'url': 'stun:'+Server.stunurl},
-      /*
-       * turn server configuration example.
-      {
-        'url': 'turn:123.45.67.89:3478',
-        'username': 'change_to_real_user',
-        'credential': 'change_to_real_secret'
-      },
-      */
-    ],
-    // 添加H264相关参数
-    'iceTransportPolicy': 'relay',
+    'iceServers': [],
+    'iceTransportPolicy': 'all',
     'bundlePolicy': 'max-bundle',
     'rtcpMuxPolicy': 'require'
   };
@@ -90,11 +79,10 @@ class Signaling {
     'mandatory': {},
     'optional': [
       {'DtlsSrtpKeyAgreement': true}, // 启用DTLS-SRTP密钥协商
-      // 添加H264编解码器优先级配置
-      {'googCpuOveruseDetection': true},
-      {'googCpuOveruseEncodeUsage': true}
+      // {'googCpuOveruseDetection': true},
+      // {'googCpuOveruseEncodeUsage': true}
     ],
-    // 指定视频编解码器
+    // 添加H264编解码器优先级配置
     'codecs': {
       'video': [
         'H264',
@@ -331,14 +319,20 @@ class Signaling {
             "uris": ["turn:127.0.0.1:19302?transport=udp"]
           }
         */
+        String turnUri = _turnCredential['uris'][0];
+        String stunUri = turnUri.replaceFirst('turn:', 'stun:').split('?')[0];
         _iceServers = {
           'iceServers': [
+            {'urls': stunUri},
             {
-              'urls': _turnCredential['uris'][0],
+              'urls': turnUri,
               'username': _turnCredential['username'],
               'credential': _turnCredential['password']
             },
-          ]
+          ],
+          'iceTransportPolicy': 'all',
+          'bundlePolicy': 'max-bundle',
+          'rtcpMuxPolicy': 'require'
         };
       } catch (e) {}
     }
@@ -381,17 +375,20 @@ class Signaling {
       // 'video': false
       'video': {  //地视频生成
         'mandatory': {
-          'minWidth': '640',
-          'minHeight': '480',
-          'minFrameRate': '60',
+          'minWidth': '1920',  //请求最小分辨率
+          'minHeight': '1080',
+          'maxWidth': '1920', // 锁定最大宽度，防止摄像头跳到 4K 导致帧率下降
+          'maxHeight': '1080',
+          'minFrameRate': '30',
+          'maxFrameRate': '60',
           // 强制使用H264
           'googVideoH264Enabled': true,
-          'googVideoH264ProfileLevelId': '42e01f'
+          'googVideoH264ProfileLevelId': '42002a'
         },
         'optional': [
-          {'profile-level-id': '42e01f'},
+          {'profile-level-id': '42002a'},
           {'level-asymmetry-allowed': 1},
-          {'packetization-mode': 1}
+          {'packetization-mode': 1},
         ]
       }
     };
@@ -449,11 +446,24 @@ class Signaling {
           };
           _localStream!.getTracks().forEach((track) async {
             _senders.add(await pc.addTrack(track, _localStream!));
-          ///仅添加音频轨道
-          //   _localStream!.getAudioTracks().forEach((track) async {
-          //     _senders.add(await pc.addTrack(track, _localStream!));
           });
+          // 设置编码器参数 控制码率/帧率/分辨率
+          for (var sender in _senders) {
+            if (sender.track?.kind == 'video') {
+              RTCRtpParameters parameters = sender.parameters;
+
+              for (var encoding in parameters.encodings!) {
+                encoding.minBitrate = 2500000;     // 最低 2.5Mbps
+                encoding.maxBitrate = 5000000;    // 最高 5Mbps
+                encoding.maxFramerate = 60;       // 最大60fps
+                encoding.scaleResolutionDownBy = 1.0;  // 不缩小分辨率
+              }
+              await sender.setParameters(parameters);
+            }
+          }
+
           break;
+
       }
     }
 
@@ -553,12 +563,12 @@ class Signaling {
     var sdp = s.sdp;
 
     // 强制使用H264编码
-    sdp = sdp!.replaceAll('profile-level-id=640c1f', 'profile-level-id=42e01f'); // Baseline profile
+    sdp = sdp!.replaceAll('profile-level-id=640c1f', 'profile-level-id=42002a'); // Baseline profile
 
     // 调整编解码器优先级
     sdp = sdp.replaceAll(
         'a=rtpmap:100 VP8/90000',
-        'a=rtpmap:100 H264/90000\r\na=fmtp:100 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f'
+        'a=rtpmap:100 H264/90000\r\na=fmtp:100 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42002a'
     );
 
     // 确保H264是首选编码
