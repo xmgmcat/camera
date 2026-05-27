@@ -1,0 +1,103 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Build Android (32 & 64 bit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 临时将阿里云镜像替换为官方仓库（不修改仓库中的文件）
+      - name: Replace Aliyun mirrors with official repos (temporary)
+        run: |
+          # 备份原始文件（可选）
+          cp android/build.gradle.kts android/build.gradle.kts.bak
+          # 删除或注释所有包含 maven.aliyun.com 的行
+          sed -i '/maven.aliyun.com/d' android/build.gradle.kts
+          echo "Modified android/build.gradle.kts:"
+          grep -E "repositories|google|mavenCentral" android/build.gradle.kts || true
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK for armeabi-v7a
+        run: flutter build apk --release --target-platform android-arm
+
+      - name: Save armeabi-v7a APK
+        run: |
+          mkdir -p build/apks/armv7
+          cp build/app/outputs/flutter-apk/app-release.apk build/apks/armv7/app-armeabi-v7a-release.apk
+
+      - name: Build APK for arm64-v8a
+        run: flutter build apk --release --target-platform android-arm64
+
+      - name: Save arm64-v8a APK
+        run: |
+          mkdir -p build/apks/arm64
+          cp build/app/outputs/flutter-apk/app-release.apk build/apks/arm64/app-arm64-v8a-release.apk
+
+      - name: Collect APKs
+        run: |
+          mkdir -p build/app/outputs/flutter-apk
+          cp build/apks/armv7/*.apk build/app/outputs/flutter-apk/
+          cp build/apks/arm64/*.apk build/app/outputs/flutter-apk/
+
+      - name: Upload APKs as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apks
+          path: build/app/outputs/flutter-apk/*.apk
+
+  create-release:
+    name: Create GitHub Release & Upload Assets
+    needs: [build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code (to read pubspec.yaml)
+        uses: actions/checkout@v4
+
+      - name: Download Android APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apks
+          path: android-artifacts
+
+      - name: Get version from pubspec.yaml
+        id: get_version
+        run: |
+          VERSION=$(grep '^version: ' pubspec.yaml | sed 's/version: //' | tr -d '[:space:]')
+          echo "app_version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.get_version.outputs.app_version }}
+          name: Release v${{ steps.get_version.outputs.app_version }}
+          draft: false
+          prerelease: false
+          files: |
+            android-artifacts/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
