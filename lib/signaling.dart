@@ -86,7 +86,9 @@ class Signaling {
     'codecs': {
       'video': [
         'H264',
-        'VP8',  // 保留备选方案
+        'VP8',
+        'red',
+        'ulpfec',
       ]
     }
   };
@@ -375,18 +377,18 @@ class Signaling {
       // 'video': false
       'video': {  //地视频生成
         'mandatory': {
-          'minWidth': '1920',  //请求最小分辨率
-          'minHeight': '1080',
+          'minWidth': '1820',  //请求最小分辨率
+          'minHeight': '720',
           'maxWidth': '1920', // 锁定最大宽度，防止摄像头跳到 4K 导致帧率下降
           'maxHeight': '1080',
-          'minFrameRate': '30',
+          'minFrameRate': '15',
           'maxFrameRate': '60',
           // 强制使用H264
           'googVideoH264Enabled': true,
-          'googVideoH264ProfileLevelId': '42002a'
+          'googVideoH264ProfileLevelId': '640029'
         },
         'optional': [
-          {'profile-level-id': '42002a'},
+          {'profile-level-id': '640029'},
           {'level-asymmetry-allowed': 1},
           {'packetization-mode': 1},
         ]
@@ -448,16 +450,40 @@ class Signaling {
             _senders.add(await pc.addTrack(track, _localStream!));
           });
           // 设置编码器参数 控制码率/帧率/分辨率
+          // Simulcast 三层编码 + 自适应调节
           for (var sender in _senders) {
             if (sender.track?.kind == 'video') {
               RTCRtpParameters parameters = sender.parameters;
 
-              for (var encoding in parameters.encodings!) {
-                encoding.minBitrate = 2500000;     // 最低 2.5Mbps
-                encoding.maxBitrate = 5000000;    // 最高 5Mbps
-                encoding.maxFramerate = 60;       // 最大60fps
-                encoding.scaleResolutionDownBy = 1.0;  // 不缩小分辨率
-              }
+              parameters.encodings = [
+                RTCRtpEncoding(
+                  rid: 'h',
+                  active: true,
+                  maxBitrate: 5000000,
+                  minBitrate: 2000000,
+                  maxFramerate: 60,
+                  scaleResolutionDownBy: 1.0, // 1080p
+                  scalabilityMode: 'L3T3',
+                ),
+                RTCRtpEncoding(
+                  rid: 'm',
+                  active: true,
+                  maxBitrate: 2500000,
+                  minBitrate: 800000,
+                  maxFramerate: 30,
+                  scaleResolutionDownBy: 1.5, // 720p
+                  scalabilityMode: 'L3T3',
+                ),
+                RTCRtpEncoding(
+                  rid: 'l',
+                  active: true,
+                  maxBitrate: 1000000,
+                  minBitrate: 300000,
+                  maxFramerate: 20,
+                  scaleResolutionDownBy: 2.0, // 540p
+                  scalabilityMode: 'L3T3',
+                ),
+              ];
               await sender.setParameters(parameters);
             }
           }
@@ -562,13 +588,13 @@ class Signaling {
   RTCSessionDescription _fixSdp(RTCSessionDescription s) {
     var sdp = s.sdp;
 
-    // 强制使用H264编码
-    sdp = sdp!.replaceAll('profile-level-id=640c1f', 'profile-level-id=42002a'); // Baseline profile
+    // 强制使用 H.264 High Profile, Level 4.1
+    sdp = sdp!.replaceAll('profile-level-id=640c1f', 'profile-level-id=640029');
 
     // 调整编解码器优先级
     sdp = sdp.replaceAll(
         'a=rtpmap:100 VP8/90000',
-        'a=rtpmap:100 H264/90000\r\na=fmtp:100 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42002a'
+        'a=rtpmap:100 H264/90000\r\na=fmtp:100 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640029'
     );
 
     // 确保H264是首选编码
