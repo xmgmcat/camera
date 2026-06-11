@@ -374,24 +374,11 @@ class Signaling {
   Future<MediaStream> createStream(String media) async {
     final Map<String, dynamic> mediaConstraints = {
       'audio': true,
-      // 'video': false
-      'video': {  //地视频生成
-        'mandatory': {
-          'minWidth': '1820',  //请求最小分辨率
-          'minHeight': '720',
-          'maxWidth': '1920', // 锁定最大宽度，防止摄像头跳到 4K 导致帧率下降
-          'maxHeight': '1080',
-          'minFrameRate': '15',
-          'maxFrameRate': '60',
-          // 强制使用H264
-          'googVideoH264Enabled': true,
-          'googVideoH264ProfileLevelId': '640029'
-        },
-        'optional': [
-          {'profile-level-id': '640029'},
-          {'level-asymmetry-allowed': 1},
-          {'packetization-mode': 1},
-        ]
+      'video': {
+        'width': { 'min': 640, 'ideal': 1920 },      // 强制宽 > 高，横屏
+        'height': { 'max': 1080, 'ideal': 1080 },
+        'aspectRatio': 16 / 9,                       // 强制 16:9
+        'frameRate': { 'min': 12, 'max': 60 },       // 帧率范围 12~60
       }
     };
 
@@ -446,47 +433,10 @@ class Signaling {
               onAddRemoteStream?.call(newSession, event.streams[0]);
             }
           };
+          // 添加所有轨道（音频+视频）
           _localStream!.getTracks().forEach((track) async {
             _senders.add(await pc.addTrack(track, _localStream!));
           });
-          // 设置编码器参数 控制码率/帧率/分辨率
-          // Simulcast 三层编码 + 自适应调节
-          for (var sender in _senders) {
-            if (sender.track?.kind == 'video') {
-              RTCRtpParameters parameters = sender.parameters;
-
-              parameters.encodings = [
-                RTCRtpEncoding(
-                  rid: 'h',
-                  active: true,
-                  maxBitrate: 5000000,
-                  minBitrate: 2000000,
-                  maxFramerate: 60,
-                  scaleResolutionDownBy: 1.0, // 1080p
-                  scalabilityMode: 'L3T3',
-                ),
-                RTCRtpEncoding(
-                  rid: 'm',
-                  active: true,
-                  maxBitrate: 2500000,
-                  minBitrate: 800000,
-                  maxFramerate: 30,
-                  scaleResolutionDownBy: 1.5, // 720p
-                  scalabilityMode: 'L3T3',
-                ),
-                RTCRtpEncoding(
-                  rid: 'l',
-                  active: true,
-                  maxBitrate: 1000000,
-                  minBitrate: 300000,
-                  maxFramerate: 20,
-                  scaleResolutionDownBy: 2.0, // 540p
-                  scalabilityMode: 'L3T3',
-                ),
-              ];
-              await sender.setParameters(parameters);
-            }
-          }
 
           break;
 
