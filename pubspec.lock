@@ -134,6 +134,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "5.0.0"
+  flutter_serial_communication:
+    dependency: "direct main"
+    description:
+      name: flutter_serial_communication
+      sha256: "5ef6696dac2a2b31737a65981b2042f77f470131570d87fafbbfb55dce9be2b1"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "0.2.8"
   flutter_test:
     dependency: "direct dev"
     description: flutter
@@ -501,6 +509,30 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "1.4.0"
+  usb:
+    dependency: "direct main"
+    description:
+      name: usb
+      sha256: f3606c4c154d1b970f2c91caf3157a0ba6d2fb80dc8b4a4c7e103a3b9ee34c39
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "0.2.0"
+  usb_android:
+    dependency: transitive
+    description:
+      name: usb_android
+      sha256: "013511a05f1cdf21a4eaf4e716957a3fb71823e75b344ed618e342949cbb438f"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "0.2.0"
+  usb_platform_interface:
+    dependency: transitive
+    description:
+      name: usb_platform_interface
+      sha256: b36027d6d4edd1c0d2087cee279d1561278d56fc17af84ec8ab0244e04f962cd
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "0.2.0"
   vector_math:
     dependency: transitive
     description:

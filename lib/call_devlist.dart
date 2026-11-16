@@ -1,24 +1,21 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:core';
-import 'foreground_task_handler.dart';
 import 'signaling.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
-/// CallSample类，继承自StatefulWidget，用于创建P2P通话示例界面
-class CallSample extends StatefulWidget {
+///创建P2P通话界面
+class CallDevlist extends StatefulWidget {
   static String tag = 'call_sample';
   final String host; // WebSocket服务器地址
-  CallSample({required this.host}); // 构造函数，初始化服务器地址
+  CallDevlist({required this.host}); // 构造函数，初始化服务器地址
 
   @override
-  _CallSampleState createState() => _CallSampleState(); // 创建状态管理对象
+  _CallDevlistState createState() => _CallDevlistState(); // 创建状态管理对象
 }
 
-/// _CallSampleState类，管理CallSample界面的状态
-class _CallSampleState extends State<CallSample> {
+/// 管理界面的状态
+class _CallDevlistState extends State<CallDevlist> {
   Signaling? _signaling; // 信令对象，用于处理WebSocket通信
   List<dynamic> _peers = []; // 对等方列表
   String? _selfId; // 当前用户的ID
@@ -29,7 +26,7 @@ class _CallSampleState extends State<CallSample> {
   bool _waitAccept = false; // 是否等待对方接受通话
 
   // ignore: unused_element
-  _CallSampleState(); // 构造函数
+  _CallDevlistState(); // 构造函数
 
   @override
   initState() {
@@ -37,52 +34,8 @@ class _CallSampleState extends State<CallSample> {
     initRenderers().then((_) {// 初始化视频渲染器
       // 等待初始化完成在连接
       _connect(context);// 连接到信令服务器
-      //Android和ios启动后台保活服务
-      if (Platform.isAndroid || Platform.isIOS) {
-        _initForegroundTask();
-        _startForegroundService();
-      }
     });
   }
-
-  void _initForegroundTask() {
-    FlutterForegroundTask.init(
-      androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'foreground_service',
-        channelName: '摄像头服务',
-        channelDescription: '摄像头后台服务正在运行',
-        onlyAlertOnce: true,
-      ),
-      iosNotificationOptions: const IOSNotificationOptions(
-        showNotification: false,
-        playSound: false,
-      ),
-      foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(10000), // 每10秒触发一次 repeat 事件
-        autoRunOnBoot: true,
-        allowWakeLock: true,
-        allowWifiLock: true,
-      ),
-    );
-  }
-
-  Future<void> _startForegroundService() async {
-    if (!await FlutterForegroundTask.isRunningService) {
-      await FlutterForegroundTask.startService(
-        notificationTitle: '摄像头服务运行中',
-        notificationText: '点击返回应用',
-        notificationIcon: null, // 使用默认图标
-        notificationInitialRoute: '/CallSample', // 返回到指定页面
-        callback: startForegroundTaskCallback,
-      );
-    }
-  }
-  @pragma('vm:entry-point')
-  void startForegroundTaskCallback() {
-    FlutterForegroundTask.setTaskHandler(ForegroundTaskHandler());
-  }
-
-
 
 
   /// 初始化视频渲染器
@@ -238,11 +191,10 @@ class _CallSampleState extends State<CallSample> {
     return ListBody(children: <Widget>[
       ListTile(
         title: Text(self
-            ? peer['name'] + ', ID: ${peer['id']} ' + ' [此设备]'
-            : peer['name'] + ', ID: ${peer['id']} '),
+            ? 'ID: ${peer['id']} ' + ' [此设备]'
+            : 'ID: ${peer['id']} '),
         onTap: null,
 
-        subtitle: Text('[' + peer['user_agent'] + ']'),
       ),
       Divider()
     ]);
@@ -252,8 +204,7 @@ class _CallSampleState extends State<CallSample> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('在线设备列表' +
-            (_selfId != null ? ' [本机房间号 ($_selfId)] ' : '')),
+        title: Text('设备列表'),
 
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,

@@ -28,9 +28,9 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
-        }
+//        ndk {
+//            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+//        }
     }
 
     buildTypes {
@@ -38,6 +38,11 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // 启用代码压缩
+            isMinifyEnabled = true
+
+            // 启用资源压缩
+            isShrinkResources = true
         }
     }
 }

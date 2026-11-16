@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'call_sample.dart';
+import 'call_devlist.dart';
 import 'server.dart';
-import 'foreground_task_handler.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 
 void main() => runApp(MyApp());
@@ -17,7 +15,7 @@ class MyApp extends StatelessWidget {
       initialRoute: 'home', // 设置初始路由设置主页为 home
       routes: {
         'home': (context) => HomeScreen(),
-        'CallSample': (context) => CallSample(host: Server.host), // 定义 CallSample 路由
+        'CallDevlist': (context) => CallDevlist(host: Server.host), // 定义路由
       },
     );
   }
@@ -38,13 +36,6 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isInitialized = true;
         requestPermissions(); //申请摄像头，录音权限
-        //初始化设置TaskHandler
-        WidgetsFlutterBinding.ensureInitialized();
-        // 初始化通信端口（用于前后台数据通信）
-        FlutterForegroundTask.initCommunicationPort();
-        // 设置 TaskHandler
-        FlutterForegroundTask.setTaskHandler(ForegroundTaskHandler());
-
       });
     });
   }
@@ -54,11 +45,12 @@ class _HomeScreenState extends State<HomeScreen> {
     await [Permission.camera, Permission.microphone].request();
   }
 
-  /// 初始化读取SharedPreferences数据，并设置到服务变量仓库
+  /// 初始化读取SharedPreferences数据，并设置到服务变量实例
   Future<void> _initSharedPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     Server.host = prefs.getString('host') ?? '';
     Server.room = prefs.getString('room') ?? '';
+    Server.serialBaudRate = int.tryParse(prefs.getString('serialbaudrate') ?? '115200') ?? 115200;
   }
 
   @override
@@ -121,7 +113,8 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 弹出设置对话框
   void _showSettingsDialog(BuildContext context) async {
     final TextEditingController controller1 = TextEditingController(text: Server.host);
-    final TextEditingController controller3 = TextEditingController(text: Server.room);
+    final TextEditingController controller2 = TextEditingController(text: Server.room);
+    final TextEditingController controller3 = TextEditingController(text: Server.serialBaudRate.toString());
     showDialog(
       context: context,
       builder: (context) {
@@ -135,22 +128,25 @@ class _HomeScreenState extends State<HomeScreen> {
                 decoration: InputDecoration(labelText: '信令服务器地址'),
               ),
               TextField(
-                controller: controller3,
+                controller: controller2,
                 decoration: InputDecoration(labelText: '房间号'),
+              ),TextField(
+                controller: controller3,
+                decoration: InputDecoration(labelText: '串口波特率'),
               ),
             ],
           ),
           actions: [
             TextButton(
               onPressed: () async {
-                if (controller1.text.isEmpty || controller3.text.isEmpty) {
+                if (controller1.text.isEmpty || controller2.text.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('缺少必要数据')),
                   );
                   return;
                 }
                 // 保存数据到本地
-                await _saveData(controller1.text, controller3.text);
+                await _saveData(controller1.text, controller2.text, controller3.text);
                 Navigator.of(context).pop();
                 // 跳转到视频设备列表
                 _callNva();
@@ -164,17 +160,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// 保存数据到 SharedPreferences
-  Future<void> _saveData(String value1, String value3) async {
+  Future<void> _saveData(String value1, String value2, String value3) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('host', value1);
-    await prefs.setString('room', value3);
+    await prefs.setString('room', value2);
+    await prefs.setString('serialbaudrate', value3);
     //首次打开不存在数据，所以在第一次保存数据时，数据没有传到全局全局变量去，
     // 所以要更新全局变量
     _initSharedPreferences();
   }
 
   Future<void> _callNva() async {
-    Navigator.pushNamed(context, 'CallSample');
+    Navigator.pushNamed(context, 'CallDevlist');
   }
 
 }
