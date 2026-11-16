@@ -6,7 +6,10 @@ import 'websocket.dart'
 if (dart.library.js) 'websocket_web.dart';
 import 'turn.dart';
 import 'server.dart' if (dart.library.js) '../utils/turn_web.dart';
-import 'device_info.dart';
+import 'package:flutter_serial_communication/flutter_serial_communication.dart';
+import 'package:flutter_serial_communication/models/device_info.dart';
+import 'dart:typed_data';
+import 'package:usb/usb.dart';
 
 /// 信令状态枚举，表示WebRTC信令连接的状态。
 enum SignalingState {
@@ -78,15 +81,12 @@ class Signaling {
   final Map<String, dynamic> _config = {
     'mandatory': {},
     'optional': [
-      {'DtlsSrtpKeyAgreement': true}, // 启用DTLS-SRTP密钥协商
-      // {'googCpuOveruseDetection': true},
-      // {'googCpuOveruseEncodeUsage': true}
+      {'DtlsSrtpKeyAgreement': true},
     ],
-    // 添加H264编解码器优先级配置
     'codecs': {
       'video': [
+        'VP8',        // 优先 VP8，绕过 H.264 在 flutter-webrtc 上的码率 bug
         'H264',
-        'VP8',
         'red',
         'ulpfec',
       ]
@@ -100,14 +100,31 @@ class Signaling {
     },
     'optional': [],
   };
-
   Function(String reason)? onConnectionFailed; // 连接失败回调
+
+  // USB 串口相关
+  bool _isUsbHotplugListenerInitialized = false;
+  late final USBManager _usbManager;
+  FlutterSerialCommunication? _serialPlugin;
+  DeviceInfo? _connectedDevice;
+  bool _isSerialConnected = false;
+  Function(bool connected)? onSerialConnectionChanged;// USB 串口连接状态变化回调
+  // USB 热插拔监听相关
+  StreamSubscription? _usbAttachSubscription;
+  StreamSubscription? _usbDetachSubscription;
 
 
   /// 关闭信令连接并清理会话。
   close() async {
+    // 停止 USB 热插拔监听
+    await _usbAttachSubscription?.cancel();
+    await _usbDetachSubscription?.cancel();
+
     await _cleanSessions();
     _socket?.close();
+
+    // 断开 USB 串口
+    await _disconnectUsb();
   }
 
   /// 切换摄像头。
@@ -220,6 +237,14 @@ class Signaling {
           switchCamera();
         }
         break;
+      case 'message':
+        var ToID = data['toid'];
+        var content = data['content'];
+      if (ToID == _selfId) {
+        // print('遥控数据: $content');
+        _sendToSerial(content);         // 发送数据到单片机
+      }
+      break;
       case 'offer':
         {
           var peerId = data['from'];
@@ -339,14 +364,16 @@ class Signaling {
       } catch (e) {}
     }
 
-    _socket?.onOpen = () {
+    _socket?.onOpen = () async {
       print('onOpen');
       onSignalingStateChange?.call(SignalingState.ConnectionOpen);
       _send('new', {
-        'name': DeviceInfo.label,
         'id': _selfId,
-        'user_agent': DeviceInfo.userAgent
       });
+      // 创建 USBManager 实例并初始化
+      _usbManager = USBManager();
+      // 启动usb热插拔监听
+      _initUsbHotplugListener();
     };
 
     _socket?.onMessage = (message) {
@@ -375,17 +402,16 @@ class Signaling {
     final Map<String, dynamic> mediaConstraints = {
       'audio': true,
       'video': {
-        'width': { 'min': 640, 'ideal': 1920 },      // 强制宽 > 高，横屏
-        'height': { 'max': 1080, 'ideal': 1080 },
-        'aspectRatio': 16 / 9,                       // 强制 16:9
-        'frameRate': { 'min': 12, 'max': 60 },       // 帧率范围 12~60
+        'width': {'ideal': 1920},
+        'height': {'ideal': 1080},
+        'aspectRatio': {'ideal': 16 / 9},
+        'frameRate': {'min': 10, 'ideal': 15, 'max': 15}, // 上限锁 15fps
       }
     };
 
     MediaStream stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
     return stream;
   }
-
 
   /// 创建或更新一个用于WebRTC通信的会话。
   ///
@@ -397,6 +423,7 @@ class Signaling {
   /// [media]: 会话中使用的媒体类型（例如，'audio'、'video'、'data'）。
   ///
   /// 返回一个表示创建或更新的会话的[Future<Session>]。
+  /// 创建或更新一个用于WebRTC通信的会话。
   Future<Session> _createSession(Session? session, {
     required String peerId,
     required String sessionId,
@@ -433,13 +460,27 @@ class Signaling {
               onAddRemoteStream?.call(newSession, event.streams[0]);
             }
           };
-          // 添加所有轨道（音频+视频）
+
           _localStream!.getTracks().forEach((track) async {
             _senders.add(await pc.addTrack(track, _localStream!));
           });
 
+          // 等待 sender 就绪后设置参数
+          await Future.delayed(const Duration(milliseconds: 200));
+          List<RTCRtpSender> senders = await pc.getSenders();
+          for (var sender in senders) {
+            if (sender.track?.kind == 'video') {
+              var params = sender.parameters;
+              params.degradationPreference = RTCDegradationPreference.MAINTAIN_FRAMERATE;
+              if (params.encodings != null && params.encodings!.isNotEmpty) {
+                params.encodings![0].maxBitrate = 3000000;
+                params.encodings![0].maxFramerate = 15;
+              }
+              await sender.setParameters(params);
+              print('Video sender: maintain-resolution, maxBitrate=2.5Mbps');
+            }
+          }
           break;
-
       }
     }
 
@@ -451,17 +492,16 @@ class Signaling {
       }
       await Future.delayed(
           const Duration(seconds: 1),
-              () =>
-              _send('candidate', {
-                'to': peerId,
-                'from': _selfId,
-                'candidate': {
-                  'sdpMLineIndex': candidate.sdpMLineIndex,
-                  'sdpMid': candidate.sdpMid,
-                  'candidate': candidate.candidate,
-                },
-                'session_id': sessionId,
-              }));
+              () => _send('candidate', {
+            'to': peerId,
+            'from': _selfId,
+            'candidate': {
+              'sdpMLineIndex': candidate.sdpMLineIndex,
+              'sdpMid': candidate.sdpMid,
+              'candidate': candidate.candidate,
+            },
+            'session_id': sessionId,
+          }));
     };
 
     // 处理远程流移除。
@@ -537,26 +577,10 @@ class Signaling {
   /// 返回修改后的SDP描述。
   RTCSessionDescription _fixSdp(RTCSessionDescription s) {
     var sdp = s.sdp;
-
-    // 强制使用 H.264 High Profile, Level 4.1
-    sdp = sdp!.replaceAll('profile-level-id=640c1f', 'profile-level-id=640029');
-
-    // 调整编解码器优先级
-    sdp = sdp.replaceAll(
-        'a=rtpmap:100 VP8/90000',
-        'a=rtpmap:100 H264/90000\r\na=fmtp:100 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640029'
-    );
-
-    // 确保H264是首选编码
-    sdp = sdp.replaceAllMapped(RegExp(r'm=video.*'), (match) {
-      return match.group(0)!
-          .replaceAll('VP8', 'H264')
-          .replaceAll('VP9', 'H264');
-    });
-
+    // 移除视频方向标记，强制接收端按横屏渲染
+    sdp = sdp?.replaceAll("a=extmap:13 urn:3gpp:video-orientation\r\n", "");
     return RTCSessionDescription(sdp, s.type);
   }
-
 
   /// 为会话创建answer并发送给对等方。
   ///
@@ -578,6 +602,93 @@ class Signaling {
     }
   }
 
+  void _initUsbHotplugListener() {
+      if (_isUsbHotplugListenerInitialized) return;
+      _isUsbHotplugListenerInitialized = true;
+      // 监听设备插入
+      _usbAttachSubscription = _usbManager.deviceAttached.listen((USBDevice device) async {
+        final vendorId = await device.getVendorId();      // 异步获取
+        final productId = await device.getProductId();    // 异步获取
+        print("检测到设备插入: VID=0x${vendorId.toRadixString(16)}, PID=0x${productId.toRadixString(16)}");
+        Future.delayed(Duration(milliseconds: 500), () async {
+          await _tryConnectFirstUsbDevice();
+        });
+      });
+
+      // 监听设备拔出
+      _usbDetachSubscription = _usbManager.deviceDetached.listen((USBDevice device) async {
+        final vendorId = await device.getVendorId();
+        final productId = await device.getProductId();
+        print("设备拔出: VID=0x${vendorId.toRadixString(16)}, PID=0x${productId.toRadixString(16)}");
+        if (_isSerialConnected) _disconnectUsb();
+      });
+  }
+
+  Future<void> _tryConnectFirstUsbDevice() async {
+    if (_serialPlugin == null) {
+      _serialPlugin = FlutterSerialCommunication();
+      // 设置监听器
+      _serialPlugin!.getDeviceConnectionListener().receiveBroadcastStream().listen((connected) {
+        _isSerialConnected = connected;
+        onSerialConnectionChanged?.call(connected);
+        print("USB串口连接状态: $connected");
+      });
+      _serialPlugin!.getSerialMessageListener().receiveBroadcastStream().listen((data) {
+        print("收到单片机数据: $data");
+      });
+    }
+
+    try {
+      // 获取设备列表（异步）
+      final devicesMap = await _usbManager.getDevices();
+      final usbDeviceList = devicesMap.values.toList();
+
+      if (usbDeviceList.isEmpty) {
+        print("未发现USB设备");
+        return;
+      }
+
+      // 扫描并连接串口设备
+      final serialDevices = await _serialPlugin!.getAvailableDevices();
+      if (serialDevices.isEmpty) {
+        print("未发现USB串口设备");
+        return;
+      }
+
+      final targetDevice = serialDevices.first;
+      print("尝试连接串口设备: ${targetDevice.productName}");
+      final success = await _serialPlugin!.connect(targetDevice, Server.serialBaudRate);
+      if (success) {
+        print("USB串口连接成功");
+        _connectedDevice = targetDevice;
+        _isSerialConnected = true;
+      } else {
+        print("USB串口连接失败");
+      }
+    } catch (e) {
+      print("连接出错: $e");
+    }
+  }
+
+  Future<void> _sendToSerial(dynamic content) async {
+    if (!_isSerialConnected || _serialPlugin == null) {
+      print("USB串口未连接，无法发送数据");
+      return;
+    }
+    String messageStr = content is String ? content : jsonEncode(content);
+    Uint8List data = Uint8List.fromList(messageStr.codeUnits);
+    await _serialPlugin!.write(data);
+  }
+
+  Future<void> _disconnectUsb() async {
+    if (_serialPlugin != null && _isSerialConnected) {
+      await _serialPlugin!.disconnect();
+    }
+    _connectedDevice = null;
+    _isSerialConnected = false;
+    print("USB串口已断开");
+  }
+
   /// 发送带有指定事件和数据的WebSocket消息。
   ///
   /// [event]: 要发送的事件类型。
@@ -588,6 +699,7 @@ class Signaling {
     request["data"] = data;
     _socket?.send(_encoder.convert(request));
   }
+
 
   /// 通过停止和释放本地流以及关闭对等连接来清理所有会话。
   Future<void> _cleanSessions() async {
